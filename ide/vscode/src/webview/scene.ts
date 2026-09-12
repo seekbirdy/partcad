@@ -320,7 +320,7 @@ export async function showGeometry(message: ShowMessage): Promise<void> {
             // MeshPhongMaterial, which is what gives every PartCAD model the
             // same look regardless of how it was authored.
             const previous = mesh.material as THREE.Material | THREE.Material[] | undefined;
-            mesh.material = new THREE.MeshPhongMaterial();
+            mesh.material = new THREE.MeshPhongMaterial({ color: 0x87CEEB });
             disposeMaterials(previous);
         });
         parsed.name = object.name;
@@ -381,6 +381,35 @@ export function resizeCanvas(): void {
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+}
+
+export function setAutoRotate(enabled: boolean): void {
+    controls.autoRotate = enabled;
+}
+
+export function setOpacity(opacity: number): void {
+    if (content) {
+        content.traverse((node) => {
+            const mesh = node as THREE.Mesh;
+            if (!mesh.isMesh) {
+                return;
+            }
+            const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
+            if (Array.isArray(material)) {
+                material.forEach((m) => {
+                    const mat = m as THREE.MeshPhongMaterial;
+                    mat.transparent = true;
+                    mat.opacity = opacity;
+                    mat.needsUpdate = true;
+                });
+            } else if (material) {
+                const mat = material as THREE.MeshPhongMaterial;
+                mat.transparent = true;
+                mat.opacity = opacity;
+                mat.needsUpdate = true;
+            }
+        });
+    }
 }
 
 function animate(): void {

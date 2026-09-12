@@ -42,7 +42,7 @@ import {
     TabId,
     isAnalysisTab,
 } from './messages';
-import { clearGeometry, resizeCanvas, showGeometry } from './scene';
+import { clearGeometry, resizeCanvas, showGeometry, setOpacity, setAutoRotate } from './scene';
 import { SupplyView } from './supply';
 import { TabSpec, Tabs } from './tabs';
 
@@ -68,6 +68,26 @@ for (const tab of ANALYSIS_TABS) {
     caeViews[tab] = new CaeView(panes[tab], tab, (implementation) => runAnalysis(tab, implementation));
 }
 const tabs = new Tabs(byId('tabs'), onTabSelected);
+
+// Initialize animation checkbox
+const animateCheckbox = document.getElementById('animate-checkbox') as HTMLInputElement;
+if (animateCheckbox) {
+    animateCheckbox.addEventListener('change', (event) => {
+        setAutoRotate((event.target as HTMLInputElement).checked);
+    });
+}
+
+// Initialize opacity slider
+const opacitySlider = document.getElementById('opacity-slider') as HTMLInputElement;
+const opacityValue = document.getElementById('opacity-value') as HTMLSpanElement;
+if (opacitySlider && opacityValue) {
+    opacitySlider.addEventListener('input', (event) => {
+        const value = parseInt((event.target as HTMLInputElement).value, 10);
+        const opacity = value / 100;
+        setOpacity(opacity);
+        opacityValue.textContent = `${value}%`;
+    });
+}
 
 /** What the panel is showing, or undefined when it is empty. */
 let shown: ShowMessage | undefined;
