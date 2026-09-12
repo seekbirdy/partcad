@@ -191,6 +191,11 @@ function show(message: ShowMessage): void {
     }
 
     void showGeometry(message);
+    // Apply current opacity slider value to newly loaded geometry
+    if (opacitySlider) {
+        const opacity = parseInt(opacitySlider.value, 10) / 100;
+        setOpacity(opacity);
+    }
     // Rebuilt on every show, which also re-asks for whatever tab the user is on:
     // the object may be the same one after an edit, and its answers may not be.
     tabs.setTabs(tabsFor(message));
