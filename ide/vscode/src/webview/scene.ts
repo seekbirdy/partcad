@@ -145,6 +145,29 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
     return bytes.buffer;
 }
 
+function generateLightColor(): number {
+    // Generate a random light color (high brightness, moderate saturation)
+    const hue = Math.random();
+    const saturation = 0.4 + Math.random() * 0.3; // 0.4-0.7
+    const lightness = 0.6 + Math.random() * 0.2; // 0.6-0.8
+
+    // Convert HSL to RGB
+    const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
+    const x = c * (1 - Math.abs((hue * 6) % 2 - 1));
+    const m = lightness - c / 2;
+
+    let r = 0, g = 0, b = 0;
+    if (hue < 1/6) { r = c; g = x; }
+    else if (hue < 2/6) { r = x; g = c; }
+    else if (hue < 3/6) { g = c; b = x; }
+    else if (hue < 4/6) { g = x; b = c; }
+    else if (hue < 5/6) { r = x; b = c; }
+    else { r = c; b = x; }
+
+    const toHex = (val: number) => Math.round((val + m) * 255);
+    return (toHex(r) << 16) | (toHex(g) << 8) | toHex(b);
+}
+
 function parseGltf(buffer: ArrayBuffer): Promise<THREE.Group> {
     return new Promise((resolve, reject) => {
         // parse(), not load(): the bytes are already here, and load() would mean
@@ -309,6 +332,7 @@ export async function showGeometry(message: ShowMessage): Promise<void> {
             return;
         }
 
+        const color = generateLightColor();
         parsed.traverse((node) => {
             const mesh = node as THREE.Mesh;
             if (!mesh.isMesh) {
@@ -320,7 +344,7 @@ export async function showGeometry(message: ShowMessage): Promise<void> {
             // MeshPhongMaterial, which is what gives every PartCAD model the
             // same look regardless of how it was authored.
             const previous = mesh.material as THREE.Material | THREE.Material[] | undefined;
-            mesh.material = new THREE.MeshPhongMaterial({ color: 0x87CEEB });
+            mesh.material = new THREE.MeshPhongMaterial({ color });
             disposeMaterials(previous);
         });
         parsed.name = object.name;
