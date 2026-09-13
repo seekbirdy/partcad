@@ -177,7 +177,7 @@ function tabsFor(message: ShowMessage): TabSpec[] {
     return specs;
 }
 
-function show(message: ShowMessage): void {
+async function show(message: ShowMessage): Promise<void> {
     shown = message;
     // Nothing in flight belongs to this object, whatever it was asked for.
     awaiting.clear();
@@ -190,7 +190,7 @@ function show(message: ShowMessage): void {
         caeViews[tab]?.setBusy('Select this tab to run the analysis.');
     }
 
-    void showGeometry(message);
+    await showGeometry(message);
     // Apply current opacity slider value to newly loaded geometry
     if (opacitySlider) {
         const opacity = parseInt(opacitySlider.value, 10) / 100;
