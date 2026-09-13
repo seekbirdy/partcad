@@ -9,15 +9,14 @@
 
 import asyncio
 import re
-
 import threading
 
+from . import logging as pc_logging
+from . import telemetry
 from .geom import Location
 from .interface_inherit import InterfaceInherits
 from .sketch import Sketch
-from . import logging as pc_logging
 from .utils import resolve_resource_path
-from . import telemetry
 
 # OCP is not imported at module scope: this module is on the 'import partcad'
 # path, and only the two viewer/parameter paths below actually need OCCT, which
@@ -214,7 +213,7 @@ class InterfaceParameter:
             config["type"] = PARAM_TURN
             config["dir"] = [0.0, 0.0, 1.0]
 
-        if not "type" in config:
+        if "type" not in config:
             config["type"] = PARAM_MOVE
 
         return config
@@ -561,7 +560,7 @@ class Interface:
 
         # Enrich mating information
         mates = self.config.get("mates", None)
-        if not mates is None:
+        if mates is not None:
             if self.abstract:
                 pc_logging.error("Abstract interfaces cannot have mates: %s" % self.name)
                 return
@@ -580,7 +579,7 @@ class Interface:
         or the references to this interface in top level "mates" config sections
         of any project."""
         for target_interface_name, mate_target_config in mates.items():
-            if not ":" in target_interface_name:
+            if ":" not in target_interface_name:
                 target_interface_name = project.name + ":" + target_interface_name
             target_package_name, short_target_interface_name = project.resolve(target_interface_name)
 

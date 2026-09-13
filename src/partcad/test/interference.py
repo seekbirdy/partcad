@@ -4,8 +4,8 @@
 # Licensed under Apache License, Version 2.0.
 #
 
-from .test import Test
 from ..assembly import Assembly
+from .test import Test
 
 
 class InterferenceTest(Test):
@@ -94,8 +94,7 @@ class InterferenceTest(Test):
             shown = ", ".join(unchecked[:5]) + ("..." if len(unchecked) > 5 else "")
             self.info(
                 shape,
-                "%d part(s) are not valid solids and were not checked: %s"
-                % (len(unchecked), shown),
+                "%d part(s) are not valid solids and were not checked: %s" % (len(unchecked), shown),
             )
 
         # A pair whose boolean did not come back is not a pair that does not

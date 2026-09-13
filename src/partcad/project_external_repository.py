@@ -11,11 +11,11 @@ import asyncio
 import json
 import threading
 
+from . import logging as pc_logging
+from . import tags as pc_tags
 from .cache_hash import CacheHash
 from .project_plugin import ProjectPlugin
 from .sync_threads import threadpool_manager
-from . import logging as pc_logging
-from . import tags as pc_tags
 
 # Distinguishes "no cached value" from a cached value of None.
 _MISSING = object()
@@ -267,9 +267,7 @@ class ProjectExternalRepository(ProjectPlugin):
 
     async def _write_cache(self, scoped_key: str, value):
         try:
-            await self._cache.write_data_async(
-                self._cache_hash(scoped_key), {"data": json.dumps(value).encode()}
-            )
+            await self._cache.write_data_async(self._cache_hash(scoped_key), {"data": json.dumps(value).encode()})
         except Exception as e:
             pc_logging.debug("%s: cache write failed for '%s': %s" % (self.name, scoped_key, e))
 

@@ -9,8 +9,8 @@
 
 import asyncio
 
-from .cache_hash import CacheHash
 from . import cache_backend
+from .cache_hash import CacheHash
 
 
 class Cache:
@@ -61,9 +61,7 @@ class Cache:
 
         async def task_backend(backend):
             accepted = {
-                self._name(hash_str, key): value
-                for key, value in items.items()
-                if backend.accepts(key, len(value))
+                self._name(hash_str, key): value for key, value in items.items() if backend.accepts(key, len(value))
             }
             if not accepted:
                 return {}

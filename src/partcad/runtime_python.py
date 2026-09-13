@@ -17,12 +17,9 @@ import signal
 import subprocess
 import sys
 
-from . import sandbox_lock
-from . import sandbox_versions
-from . import runtime
 from . import logging as pc_logging
+from . import runtime, sandbox_lock, sandbox_versions, telemetry
 from .process_output import decode as decode_output
-from . import telemetry
 
 # Every session v-env directory is named this way, which is what lets the
 # environment lock recover the session hash from the path alone.
@@ -1035,7 +1032,7 @@ class PythonRuntime(runtime.Runtime):
         if path is None:
             if session is None or not session["dirty"]:
                 # Use the full interpreter path if known
-                if not self.exec_path is None:
+                if self.exec_path is not None:
                     return self.exec_path
                 # If the full path is not known, use the interpreter name
                 path = self.path

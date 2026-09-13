@@ -6,14 +6,14 @@
 #
 # Licensed under Apache License, Version 2.0.
 
-from packaging.specifiers import SpecifierSet
 import sys
 
+from packaging.specifiers import SpecifierSet
+
 from . import consts
-from . import logging as pc_logging
 from . import exception as pc_exception
-from . import sandbox_versions
-from . import telemetry
+from . import logging as pc_logging
+from . import sandbox_versions, telemetry
 
 
 @telemetry.instrument()
@@ -89,7 +89,7 @@ class Configuration:
         else:
             self.config_obj["name"] = name
 
-        if not "render" in self.config_obj or self.config_obj["render"] is None:
+        if "render" not in self.config_obj or self.config_obj["render"] is None:
             self.config_obj["render"] = {}
 
         # Backward compatibility for "import" -> "dependencies" renaming

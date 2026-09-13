@@ -1,10 +1,9 @@
 import os
 
-from .part_factory_file import PartFactoryFile
 from . import logging as pc_logging
-from . import wrapper
-from . import shape_envelope
+from . import shape_envelope, wrapper
 from .exception import PartFactoryError
+from .part_factory_file import PartFactoryFile
 
 
 class PartFactoryObj(PartFactoryFile):
@@ -59,8 +58,7 @@ class PartFactoryObj(PartFactoryFile):
             response = shape_envelope.deserialize(response_serialized)
             if not response.get("success", False):
                 message = response.get("exception") or (
-                    "the OBJ wrapper reported failure without a message for '%s:%s'"
-                    % (part.project_name, part.name)
+                    "the OBJ wrapper reported failure without a message for '%s:%s'" % (part.project_name, part.name)
                 )
                 pc_logging.error(message)
                 raise PartFactoryError(message)

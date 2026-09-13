@@ -13,9 +13,11 @@ import shutil
 import sys
 import threading
 
-from .part_factory_step import PartFactoryStep
+from partcad_utils import container_image
+
 from . import logging as pc_logging
 from . import runtime
+from .part_factory_step import PartFactoryStep
 
 kicad_runtime_lock = threading.Lock()
 kicad_runtime = None
@@ -23,14 +25,18 @@ kicad_runtime_uses_docker = False
 
 
 async def get_runtime(ctx):
-    global kicad_runtime, kicad_runtime_uses_docker, kicad_runtime_lock
+    global kicad_runtime, kicad_runtime_uses_docker
     with kicad_runtime_lock:
         kicad_runtime = runtime.Runtime(ctx, "shell")
         kicad_runtime_uses_docker = ctx.user_config.use_docker_kicad
         if kicad_runtime_uses_docker:
             await kicad_runtime.use_docker(
-                # TODO(clairbee): detect that this a build from a branch and prepend the branch name to the image tag
-                "ghcr.io/partcad/partcad-container-kicad:" + sys.modules["partcad"].__version__,
+                # The release, unless CI is running the images built out of
+                # this commit rather than the ones the release published -- the
+                # TODO that stood here asked for exactly that, and
+                # 'partcad_utils.container_image' is where it ended up.
+                "ghcr.io/partcad/partcad-container-kicad:"
+                + container_image.image_tag(sys.modules["partcad"].__version__),
                 "integration-kicad",
                 5000,
                 "localhost",

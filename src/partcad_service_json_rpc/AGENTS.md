@@ -122,8 +122,13 @@ poetry run partcad-json-rpc --http   # serve on 127.0.0.1:8017 instead
 ```bash
 poetry run black --check src/partcad_service_json_rpc tests/partcad_service_json_rpc
 poetry run flake8 src/partcad_service_json_rpc tests/partcad_service_json_rpc
-poetry run isort --check src/partcad_service_json_rpc tests/partcad_service_json_rpc
+poetry run isort --check --filter-files src/partcad_service_json_rpc tests/partcad_service_json_rpc
 ```
+
+All three gate — each is a `pre-commit` hook and a `Lint (...)` job in `test.yml`, and the tree satisfies
+all three, so a finding from any of them is yours. See the root [AGENTS.md](../../AGENTS.md) for the two flags that
+are load-bearing (`--filter-files`, and the `Flake8-pyproject` plugin without which flake8 reads no config
+at all).
 
 ## Method surface
 

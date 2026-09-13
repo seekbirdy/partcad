@@ -10,13 +10,12 @@ import os
 import re
 import stat
 import sys
-from types import ModuleType, FunctionType
 from gc import get_referents
-
+from types import FunctionType, ModuleType
 from urllib.parse import unquote, urlparse
 
-from . import telemetry
 from . import logging as pc_logging
+from . import telemetry
 
 # What counts as a URL rather than a path, wherever PartCAD has to tell the two
 # apart. Deliberately just the two schemes 'fileFrom: url' can actually fetch:
@@ -147,7 +146,7 @@ def format_parameterized_name(base: str, parameters: dict) -> str:
 
 @telemetry.start_as_current_span("resolve_resource_path")
 def resolve_resource_path(current_project_name, pattern: str):
-    if not ":" in pattern:
+    if ":" not in pattern:
         pattern = ":" + pattern
     project_pattern, item_pattern = pattern.split(":")
     if project_pattern == "":

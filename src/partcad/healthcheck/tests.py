@@ -4,10 +4,10 @@
 # Licensed under Apache License, Version 2.0.
 #
 
-import pkgutil
 import importlib
-from pathlib import Path
+import pkgutil
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from .. import logging as pc_logging
 
@@ -123,8 +123,8 @@ def run_healthchecks(filters: str = None, fix: bool = False, dry_run: bool = Fal
                             report.error(f"Auto fix raised: {error}")
                             pc_logging.exception(f"Healthcheck '{test.name}' failed while fixing")
                         if report.fixed:
-                            report.info(f"Auto fix successful")
+                            report.info("Auto fix successful")
                         else:
-                            report.error(f"Auto fix failed")
+                            report.error("Auto fix failed")
                 else:
-                    report.info(f"Passed")
+                    report.info("Passed")

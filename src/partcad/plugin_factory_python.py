@@ -12,16 +12,11 @@ import os
 import sys
 import typing
 
-from . import shape_envelope
-
+from . import logging as pc_logging
+from . import sandbox_versions, shape_envelope, telemetry, wrapper
 from .plugin import Plugin
 from .plugin_factory_file import PluginFactoryFile
 from .runtime_python import PythonRuntime, shape_docker_image
-
-from . import wrapper
-from . import logging as pc_logging
-from . import sandbox_versions
-from . import telemetry
 
 
 async def query_with_deadline(plugin: Plugin, run, timeout: int, subject: typing.Optional[str] = None):
@@ -102,9 +97,7 @@ class PluginFactoryPython(PluginFactoryFile):
         # the stricter of the two floors.
         python_version = sandbox_versions.at_least(python_version, sandbox_versions.MIN_PYTHON_VERSION_CADQUERY)
 
-        self.runtime = self.ctx.get_python_runtime(
-            python_version, image=shape_docker_image(self.config, self.project)
-        )
+        self.runtime = self.ctx.get_python_runtime(python_version, image=shape_docker_image(self.config, self.project))
         self.session = self.runtime.get_session(source_project.name)
 
     def info(self, plugin: Plugin):

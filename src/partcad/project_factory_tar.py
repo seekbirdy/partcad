@@ -11,12 +11,13 @@
 import hashlib
 import inspect
 import os
-import requests
 import tarfile
 
+import requests
+
 from . import project_factory as pf
-from .project_local import ProjectLocal
 from . import telemetry
+from .project_local import ProjectLocal
 
 
 class TarImportConfiguration:
@@ -91,7 +92,7 @@ class ProjectFactoryTar(pf.ProjectFactory, TarImportConfiguration):
                     args = inspect.getfullargspec(tar_obj.extractall)
 
                     if "filter" in args.args:
-                        if not self.import_rel_path is None:
+                        if self.import_rel_path is not None:
                             filter = lambda member, _: (
                                 member if member.name.startswith(self.import_rel_path) else None
                             )
@@ -104,7 +105,7 @@ class ProjectFactoryTar(pf.ProjectFactory, TarImportConfiguration):
             except Exception as e:
                 raise RuntimeError(f"Failed to download the tarball: {e}")
 
-        if not self.import_rel_path is None:
+        if self.import_rel_path is not None:
             cache_path = os.path.join(cache_path, self.import_rel_path)
 
         return cache_path

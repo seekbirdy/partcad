@@ -281,7 +281,40 @@ request used to get — every current image, macOS included, and the full Python
 pull request drops is coverage the commit still earns before it lands, once per merge rather than once per
 push. Everything else gets `deep`: the nightly schedule, a manual dispatch, any push, and a pull request
 whose title or description contains `#deepTest`. `#deepTest` runs exactly what it ran before any of this
-existed.
+existed. It answers a second, narrower question the same way: `#images` rebuilds PartCAD's own container
+images (see below).
+
+A third gate, `.github/actions/container-images`, answers **which images this run is about**. PartCAD's
+container images — the Python sandbox bases and the KiCad sandbox — are tagged with the release, and only the
+version bump on `devel` writes those tags, so until this existed a change to `tools/containers` built the new
+images and then tested against the last release's: a Dockerfile fix could not be proven on the pull request
+that made it, which is how the `pycairo` fix sat in the repository while every PNG went on failing. Such a run
+now builds and publishes `<release>-<branch>-<digest>-<commit>` and exports `PC_CONTAINER_IMAGE_TAG`, which
+`partcad_utils.container_image.image_tag` reads and every reader of those images goes through — so the tests
+in that run reach what that run built. It is turned on by a change under `tools/containers/` (a
+`changed-scopes` bucket) or by `#images` in the pull request, and it is off otherwise, which is why an
+ordinary pull request pays nothing extra for it -- it goes on building these images for `amd64` as a test,
+the way it always did, and goes on rendering against the release's. A branch tag is safe to publish from an
+unreviewed branch because nothing but that run asks for it -- the commit is in the name because a branch is not unique in time,
+and two pushes to one branch would otherwise build, test and *delete* one tag between them; the release tag,
+which somebody else pulls, is still only ever written by the bump. Both `CI` and `CI-Dev` call that action rather than deciding for themselves — they hand
+the answer to the same `Container (KiCad)` build, and two answers would be two tags for one image.
+
+Two consequences of that gate are worth knowing. **A test job does not build these images**: it pulls what
+`Build Docker Containers` built, which is why every job that can reach a container waits for that one.
+`.github/actions/sandbox-image` used to build a copy per job, for a reason the gate now answers; what is left
+is a pull, plus a build for the one caller with no such job to wait for (`Examples via bundle` in
+`Standalone`, which runs on the version bump in a *different* workflow from the one publishing that release's
+images). Both that build and `Build Docker Containers` run `dev-tools/ci/build-sandbox-image.sh` — there is
+one answer to "how is this image built", because two spellings of it do not fail when they drift, they
+disagree: a job testing an image built differently from the one the run published, under a name saying they
+are the same. A change to that script is a container change, like a change to a Dockerfile. And **the branch
+tags are cleaned up**: `CI` deletes the Python ones when its test jobs finish (it is their only consumer),
+and `prune-container-images.yml` sweeps nightly for the rest — the KiCad tag, which `CI` must not delete
+because `CI-Dev` reads it too, whatever a cancelled run left, and the `partcad-devcontainer` tags
+`setup-devcontainer` has published on every non-bump run since long before any of this. The sweep keeps
+anything that is not `<release>-<not py<N>>` and anything under a month old, so the release tags and the
+moving `py<N>-<arch>` tags are out of its reach by construction.
 
 `.github/actions/changed-scopes` answers **which jobs at all**, by sorting the changed files into buckets: a
 documentation-only change runs the documentation build and nothing else, an `ai-agents/` change runs the
@@ -351,7 +384,72 @@ pins the order of its `CLASSES` section, under the `reproducible` parameter of t
 default). An implementation another package supplies may not be, and those files are named one by one in that
 job's `UNSTABLE` list — keep it short, and give every entry a reason there and in the package it belongs to.
 
-Lint/format (Python): `black`, `flake8`, `isort` — configured in `pyproject.toml`.
+Lint/format (Python): **`black`, `flake8` and `isort` all gate.** Each is a `pre-commit` hook and a
+`Lint (...)` job in `test.yml`, each pins the version `pyproject.toml` resolves so the hook and the job cannot
+disagree, and the tree satisfies all three. Run them as CI runs them, from the repository root:
+
+```bash
+poetry run isort --check --diff --filter-files --settings-path pyproject.toml .
+poetry run black --check --diff .
+poetry run flake8 .
+```
+
+`.`, not a list of directories: **what is in scope is written down once, in `pyproject.toml`**, so that a hook,
+a CI job and a command you type cannot come to disagree about it. The scope is PartCAD's own Python — `src/`,
+`tests/`, `cad/`, `dev-tools/`, `ide/`, `tools/`, `docs/` and the root `conftest.py`. Two trees are held out,
+and it is a deferred decision rather than an oversight:
+
+* `examples/` is CAD part scripts written the way a *user* writes one — `from build123d import *`, and a
+  `show_object` the runner injects at execution time. Essentially all 102 of flake8's findings there are that
+  idiom (`F403`/`F405`/`F401`/`F821`), which is why `[tool.ruff.lint]` already waives those same three for
+  `pc lint` of a part. Sorting their imports carries the wrappers' risk as well, and their rendered output is
+  checked in.
+* `features/` is `behave` step definitions, where every module defines several functions named `step_impl` and
+  the decorator is what tells them apart. 29 of its 56 findings are `F811`, "redefinition of unused
+  'step_impl'" — the framework's idiom, reported as a defect.
+
+Covering either means waiving a code across a whole directory, which is a policy call and a change of its own.
+Until then, do not "fix" a finding in those two trees as part of unrelated work.
+
+A fourth job, `Lint (pre-commit)`, runs the hooks that have no job of their own — `shellcheck`, `hadolint`, the
+YAML and workflow schema checks, the whitespace fixers, and the "a README's images are checked in" check. It
+skips the three above (two red checks for one problem is noise) and `pytest`/`behave` (their own jobs).
+
+Four things about the configuration are load-bearing, and each of them was once silently not:
+
+* **`--filter-files` for isort.** isort applies `extend_skip` / `extend_skip_glob` to files it *discovers* by
+  walking a directory, and not to files handed to it by name — so without the flag, sorting a named
+  `src/partcad/wrappers/*.py` reorders imports whose order is what the dynamic loader needs (the expat/VTK
+  pin; the config comment has the detail). Pass a directory or pass the flag.
+* **`Flake8-pyproject` for flake8.** flake8 has never read `pyproject.toml` on its own. Without that plugin the
+  whole `[tool.flake8]` table is inert and flake8 checks at its built-in 79 columns, on a repository that
+  formats at 120. It is in the `dev` group for exactly this reason, and the CI job installs it explicitly.
+* **The `per-file-ignores` list is not a wish list.** Every entry is an idiom rather than a defect, and the
+  first two are the same paths isort skips, for the same reason. `E501` is waived globally because *black* owns
+  line length; `E722` and `E731` are deferred, not endorsed — see the comments in `pyproject.toml`.
+* **Each of the three spells "skip this" differently, and two of the three spellings are traps.** isort needs
+  `--filter-files` (above); black needs `force-exclude`, because `extend-exclude` applies only to files it
+  discovered by walking; and flake8 has no equivalent at all — `extend-exclude` is discovery-only and it checks
+  anything named on its command line regardless. That last one is why the `flake8` hook in
+  `dev-tools/pre-commit-config.yaml` carries an `exclude:` of its own: `pre-commit` passes staged files by name.
+
+`pyright` is configured under `[tool.pyright]` and read by Pylance, which `.devcontainer/devcontainer.json`
+recommends. It gates nothing: there is no type checker in any dependency group, and adopting one is a decision
+of its own.
+
+None of the four jobs is gated on `.github/actions/changed-scopes`, deliberately. They read the whole
+repository, and several of the trees that covers sit in buckets that leave `pytest` false —
+`ide/standalone/tests/*.py` is `ide`, `docs/*.py` and every `AGENTS.md` are `docs`, `dev-tools/pyinstaller` is
+`packaging`. Gated, a change to any of those would skip the linters altogether. Each job is seconds on one
+runner. They do keep `needs: set-matrix`, which is what makes the "a push to `devel` runs nothing unless the
+commit is a version bump" rule apply to them as well.
+
+**A `Lint (...)` job is only a gate once branch protection requires it.** A job added to `test.yml` does not
+apply to a pull request whose branch was cut before the job existed — the check simply never runs there — and
+GitHub will merge such a branch unless the check is *required* and branches must be up to date. That is not
+hypothetical: #629 merged three unsorted files 83 seconds after the isort gate landed in #633, because its own
+CI run predated the job. Adding a lint job therefore has a second half that lives in the repository settings
+and not in this tree.
 
 ### Packaging
 

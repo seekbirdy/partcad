@@ -191,7 +191,7 @@ env:
   # is the interpreter PartCAD itself runs on. 'test-pub-repo', which renders
   # the public index, uses PYTHONS_SANDBOX instead.
   PYTHONS_SLIM: '["3.10", "3.14"]'
-  VERSION: 0.8.72
+  VERSION: 0.8.76
   CONTAINER_REGISTRY: ghcr.io
   PC_TELEMETRY_ENV: test
   PC_TELEMETRY_PERFORMANCE: false
@@ -241,14 +241,23 @@ jobs:
     # deps ci", and the same line for the other two), so the union is no wider
     # in practice than the "pytest" gate this used to carry; it is written out
     # so that the day they stop agreeing is not the day a suite disappears.
+    # ...plus the run that decided to build images of its own, which is not
+    # implied by any of the three: a change that turns none of the test suites
+    # on can still carry "#images", and a run whose summary says it rebuilt
+    # these images had better have rebuilt them.
     if: >-
       ${{ needs.set-matrix.outputs.pytest == 'true'
       || needs.set-matrix.outputs.behave == 'true'
-      || needs.set-matrix.outputs.examples == 'true' }}
+      || needs.set-matrix.outputs.examples == 'true'
+      || needs.set-matrix.outputs.image-override != '' }}
     permissions:
       contents: read
       packages: write
     uses: ./.github/workflows/container-kicad.yml
+    with:
+      tag: ${{ needs.set-matrix.outputs.image-tag }}
+      push: ${{ needs.set-matrix.outputs.image-push == 'true' }}
+      release: ${{ needs.set-matrix.outputs.image-release }}
 
   build-containers:
     name: "Build Docker Containers"
@@ -268,7 +277,8 @@ jobs:
     if: >-
       ${{ needs.set-matrix.outputs.pytest == 'true'
       || needs.set-matrix.outputs.behave == 'true'
-      || needs.set-matrix.outputs.examples == 'true' }}
+      || needs.set-matrix.outputs.examples == 'true'
+      || needs.set-matrix.outputs.image-override != '' }}
     permissions:
       packages: write
     steps:
@@ -334,27 +344,43 @@ jobs:
       # Both tags are read by somebody who is not this run, and neither is a
       # thing an unreviewed branch may hand them.
       #
+      # There is a third tag, and it exists because of that last sentence. A run
+      # that changes what these images contain has to *test* what it built, and
+      # neither tag above can carry it. So such a run builds and publishes
+      # "<release>-<branch>-<digest>-<commit>-py<X>-<arch>" and points its own tests at
+      # it: a tag
+      # nobody but this run resolves, which is what makes it safe to publish
+      # from an unreviewed branch. Which runs those are is decided in "Which
+      # images this run uses" on "set-matrix"; "image-tag" and "image-push"
+      # above are that decision.
+      #
       # What consumes the published images is stated in
-      # ".github/actions/sandbox-image": a push to "devel" or "main" pulls them,
-      # because there the published image is the subject; everything else builds
-      # the tree under test, because there the published image is somebody
-      # else's build made before this commit existed.
+      # ".github/actions/sandbox-image": a push to "devel" or "main", or a run
+      # that built a tag of its own, pulls them, because there the published
+      # image is the subject; everything else builds the tree under test,
+      # because there the published image is somebody else's build made before
+      # this commit existed.
       - name: Build the Python sandbox images
         env:
           PYTHONS: ${{ env.PYTHONS }}
           DEEP: ${{ needs.set-matrix.outputs.deep }}
           IMAGE: ${{ env.CONTAINER_REGISTRY }}/${{ github.repository }}-container-python
-          PC_VERSION: ${{ env.VERSION }}
-          # The version bump on "devel", and nothing else. "workflow_dispatch"
-          # is the recovery path for a publish that failed -- it publishes
-          # whatever tree it is dispatched at, so it has to be dispatched at the
-          # bump commit and nowhere else.
-          PUSH: >-
-            ${{ ((github.event_name == 'push'
-            && github.ref == 'refs/heads/devel'
-            && startsWith(github.event.head_commit.message, 'Version updated'))
-            || github.event_name == 'workflow_dispatch')
-            && 'true' || 'false' }}
+          # The release goes *into* the image; the tag goes *on* it, and the two
+          # part company on a run that builds images of its own. What a
+          # "<release>-<branch>-<digest>-<commit>" image is for is testing this commit's
+          # Dockerfile, so the PartCAD it installs is still the release -- only
+          # the name it answers to changes, which is the name this run's tests
+          # resolve through "container_image.image_tag".
+          PC_VERSION: ${{ needs.set-matrix.outputs.image-release }}
+          IMAGE_TAG: ${{ needs.set-matrix.outputs.image-tag }}
+          # The version bump on "devel", a manual dispatch, or a run that built
+          # a branch tag of its own -- decided once, in "Which images this run
+          # uses" on "set-matrix", because "container-kicad.yml" has to be told
+          # the same answer and two copies of it are two answers.
+          PUSH: ${{ needs.set-matrix.outputs.image-push }}
+          # A run that built a tag of its own. Not the same question as PUSH,
+          # which is also true for the version bump.
+          OWN_TAG: ${{ needs.set-matrix.outputs.image-override != '' }}
         run: |
           # arm64 goes through QEMU and costs minutes per version, so a pull
           # request builds amd64 alone and a deep run covers both. That is a real
@@ -362,26 +388,38 @@ jobs:
           # Arm laptop pulls -- but the arm64 half is also what the nightly run
           # and "#deepTest" exist for, and paying it on every push to every pull
           # request would make this job the slowest thing in CI.
-          if [ "${DEEP}" = "true" ]; then
+          #
+          # A run building its own tag pays it regardless, because there the
+          # half-built tag is not a gap in coverage but a gap in the tag: the
+          # Arm test jobs resolve "<release>-<branch>-<digest>-<commit>-py<X>-arm64" like every
+          # other job, find nothing, and fall back -- "Pytest" to conda, which
+          # is the sandbox not being tested at all, and the jobs that use
+          # ".github/actions/sandbox-image" to a build of their own, which is
+          # QEMU time spent once per job instead of once here. That run asked
+          # for these images; this is what it asked for.
+          if [ "${DEEP}" = "true" ] || [ "${OWN_TAG}" = "true" ]; then
             ARCHES="amd64 arm64"
           else
             ARCHES="amd64"
           fi
           echo "Architectures: ${ARCHES}"
 
+          # The build itself is "dev-tools/ci/build-sandbox-image.sh" and not
+          # written out here, because ".github/actions/sandbox-image" also has
+          # to be able to build one -- and two spellings of "build this image"
+          # do not fail when they drift, they disagree: a job testing an image
+          # built differently from the one this job published, under a name
+          # that says they are the same.
           for PY in $(echo "${PYTHONS}" | jq -r '.[]'); do
             for ARCH in ${ARCHES}; do
               echo "::group::python ${PY} (${ARCH})"
-              docker buildx build \
-                --platform "linux/${ARCH}" \
-                --build-arg "PYTHON_VERSION=${PY}" \
-                --build-arg "PARTCAD_VERSION=${PC_VERSION}" \
-                --tag "${IMAGE}:${PC_VERSION}-py${PY}-${ARCH}" \
-                --cache-from "type=registry,ref=${IMAGE}:py${PY}-${ARCH}" \
-                --cache-to type=inline \
-                --output "type=image,push=${PUSH}" \
-                --file tools/containers/python/Dockerfile \
-                tools/containers
+              PC_IMAGE_REF="${IMAGE}:${IMAGE_TAG}-py${PY}-${ARCH}" \
+              PC_PYTHON_VERSION="${PY}" \
+              PC_PARTCAD_VERSION="${PC_VERSION}" \
+              PC_PLATFORM="linux/${ARCH}" \
+              PC_PUSH="${PUSH}" \
+              PC_CACHE_FROM="${IMAGE}:py${PY}-${ARCH}" \
+                dev-tools/ci/build-sandbox-image.sh
               echo "::endgroup::"
             done
           done
@@ -526,6 +564,18 @@ jobs:
       pytest: ${{ steps.scope.outputs.pytest }}
       behave: ${{ steps.scope.outputs.behave }}
       examples: ${{ steps.scope.outputs.examples }}
+      # What tag PartCAD's own container images are built, published and pulled
+      # under on this run, and whether this run may publish them. One answer,
+      # read by both builders and handed to every job that runs a test, so that
+      # an image built here is the image tested here. See the step below.
+      image-tag: ${{ steps.images.outputs.tag }}
+      image-push: ${{ steps.images.outputs.push }}
+      image-release: ${{ steps.images.outputs.release }}
+      # The tag as an override for PartCAD itself, empty unless this run built
+      # images of its own -- 'partcad_utils.container_image' reads it, and an
+      # empty value leaves every reader on the release, which is the default
+      # every installed PartCAD has.
+      image-override: ${{ steps.images.outputs.override }}
     steps:
       - uses: actions/checkout@v7
 
@@ -538,6 +588,17 @@ jobs:
         uses: ./.github/actions/changed-scopes
         with:
           deep: ${{ steps.depth.outputs.deep }}
+
+      # Which images this run addresses, and whether it may publish them --
+      # three cases, spelled out in the action. "test-dev.yml" asks the same
+      # question of the same action, and both hand the answer to the same
+      # "container-kicad.yml".
+      - name: Which images this run uses
+        id: images
+        uses: ./.github/actions/container-images
+        with:
+          wanted: ${{ steps.depth.outputs.images == 'true' || steps.scope.outputs.images == 'true' }}
+          release: ${{ env.VERSION }}
 
       - name: Set matrix
         id: set-matrix
@@ -613,6 +674,174 @@ jobs:
   #         job: cache-preheat
   #         preheat_only: "true"
 
+  # None of the four lint jobs is gated on "changed-scopes", and for the isort
+  # job that is a correction rather than an omission. It used to check
+  # "src tests", which is always the "code" bucket, so gating it on `pytest` was
+  # consistent. All three now check the whole repository (the scope is in
+  # "pyproject.toml"), and several of the trees that brings in belong to buckets
+  # that leave `pytest` false: "ide/standalone/tests/*.py" is `ide`, "docs/*.py"
+  # and every "AGENTS.md" are `docs`, "dev-tools/pyinstaller" is `packaging`.
+  # Gated, a change to any of those would skip the linters and merge an unsorted
+  # file -- which is how #629 merged three of them 83 seconds after the isort
+  # gate landed in #633. Each job is seconds on one runner; the gate is not
+  # worth that.
+  #
+  # "needs: set-matrix" stays, and is what keeps the "a push to devel runs
+  # nothing unless the commit is a version bump" rule applying to these jobs.
+  lint-isort:
+    name: "Lint (isort)"
+    needs: set-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # No matrix, and no "setup-all"/"setup-test". Import order is a property of
+    # the text in the repository, not of the interpreter reading it, so one
+    # runner answers for every cell the other jobs fan out over -- and this
+    # needs neither the CAD stack nor a sandbox to do it.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # Pinned, and pinned to the same version as the pre-commit hook in
+      # "dev-tools/pre-commit-config.yaml" and the "^8.0.1" in
+      # "pyproject.toml": a gate that drifts from the hook is a gate that
+      # fails a commit the hook passed.
+      - name: Install isort
+        run: pip install "isort==8.0.1"
+
+      # "--filter-files" so the "extend_skip"/"extend_skip_glob" entries in
+      # "pyproject.toml" are honoured -- see the comment beside them for what
+      # they protect and why sorting those files is a bug rather than a tidy-up.
+      #
+      # "." rather than a list of directories: what is in scope is stated in
+      # "pyproject.toml", once, for all three linters, so that this job, the
+      # "pre-commit" hook and a developer's own "poetry run isort ." cannot come
+      # to disagree about it. A path list here would be a fourth answer, and the
+      # one that silently stops covering a directory somebody adds.
+      - name: Check import order
+        run: isort --check-only --diff --filter-files --settings-path pyproject.toml .
+
+  # Siblings of the job above rather than steps inside it, deliberately: the
+  # check name is what a branch-protection rule names, so each linter gets a
+  # name of its own that can be required independently, and a red check says
+  # which linter is unhappy without opening the log. Each is seconds on one
+  # runner; the cost of three is not worth collapsing.
+  lint-black:
+    name: "Lint (black)"
+    needs: set-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      # Same version as the pre-commit hook and as `pyproject.toml` resolves.
+      # black's stable style changes between major versions, so an unpinned
+      # runner would reformat the tree from under the hook that just passed.
+      - name: Install black
+        run: pip install "black==26.5.1"
+      # "." for the reason the isort job above gives: "force-exclude" in
+      # "pyproject.toml" is what holds "examples/" and "features/" out.
+      - name: Check formatting
+        run: black --check --diff .
+
+  lint-flake8:
+    name: "Lint (flake8)"
+    needs: set-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      # `Flake8-pyproject` is what makes flake8 read `[tool.flake8]` at all.
+      # Install flake8 without it and this job checks at 79 columns and fails
+      # on a tree the hook just passed.
+      - name: Install flake8
+        run: pip install "flake8==7.3.0" "Flake8-pyproject==1.2.4"
+      # "." for the reason the isort job above gives. flake8's own
+      # "extend-exclude" holds the two trees out, and unlike the other two
+      # tools it only applies that to files it discovers by walking -- which is
+      # exactly what this is, and why the hook needs an "exclude:" of its own.
+      - name: Lint
+        run: flake8 .
+
+  # The `pre-commit` hooks that are not otherwise gated. There used to be a job
+  # for this in "test-dev.yml"; it was commented out, and had been for long
+  # enough that both paths in it had gone stale
+  # ("dev-tools/pre-commit-config.yaml" moved, ".devcontainer/.devcontainer.json"
+  # never existed under that name). So `shellcheck`, `hadolint`, the workflow
+  # and YAML schema checks, the whitespace fixers and the "examples reference a
+  # checked-in image" check were enforced only for people who happened to commit
+  # from inside the dev container.
+  #
+  # This replaces it with a job that needs no dev container at all: the hooks
+  # below install their own tools, so a plain runner with `pre-commit` on it is
+  # the whole requirement.
+  #
+  # Ungated for the reason the three jobs above are, and then some: these hooks
+  # cover shell scripts, Dockerfiles, workflow YAML and the examples tree, which
+  # no single bucket implies at all.
+  lint-pre-commit:
+    name: "Lint (pre-commit)"
+    needs: set-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('dev-tools/pre-commit-config.yaml') }}
+      - name: Install pre-commit
+        run: pip install "pre-commit==4.4.0"
+      # Two hooks shell out to a binary rather than installing one: the
+      # `shellcheck` hook declared `language: system` in
+      # "dev-tools/pre-commit-config.yaml", and hadolint, whose upstream hook is
+      # also `system`. The dev container's image carries both; a plain runner
+      # has shellcheck and not hadolint, so fetch it -- at the same version the
+      # hook's `rev:` pins, so this job and the hook check with one tool.
+      # The checksum is upstream's published one for this exact asset, pinned
+      # here rather than fetched beside the binary: a checksum downloaded from
+      # the same place as the file it vouches for verifies nothing. Verified
+      # *before* the binary is made executable or run, so a mismatch fails the
+      # job with the file still inert. Bump both together when the `rev:` in
+      # "dev-tools/pre-commit-config.yaml" moves.
+      - name: Tools the system hooks need
+        env:
+          HADOLINT_VERSION: v2.14.0
+          HADOLINT_SHA256: 6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47
+        run: |
+          set -e
+          shellcheck --version >/dev/null
+          curl -fsSL -o /tmp/hadolint \
+            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64"
+          echo "${HADOLINT_SHA256}  /tmp/hadolint" | sha256sum --check --strict -
+          sudo install -m 0755 /tmp/hadolint /usr/local/bin/hadolint
+          hadolint --version
+      # SKIP, and why each:
+      #   pytest, behave          -- their own jobs, and they need the CAD stack
+      #   isort, black, flake8    -- the three jobs above; running them here too
+      #                              would put two red checks on one problem
+      #   eslint                  -- needs `npm install` under ide/vscode; the
+      #                              extension has its own workflow
+      #   poetry-lock/export/install -- these rewrite files rather than check
+      #                              them, which is not what a CI gate does
+      - name: Run the hooks
+        env:
+          SKIP: pytest,behave,isort,black,flake8,eslint,poetry-lock,poetry-export,poetry-install
+        run: |
+          set -e
+          pre-commit run --config dev-tools/pre-commit-config.yaml \
+            --all-files --show-diff-on-failure --color=always
+
   test-pytest:
     name: "Pytest"
     needs:
@@ -637,6 +866,20 @@ jobs:
     # here: ubuntu ~25-31 min, Windows ~38-50 min -- the 45-minute step was still
     # catching the slower Windows runs, so give it headroom.
     timeout-minutes: 60
+
+    # The tag PartCAD addresses its own container images by, empty on a run
+    # that built none of its own -- and an empty value is the release, which is
+    # what every installed PartCAD resolves. So this line changes nothing except
+    # on a run that changed what the images contain, where it is what points the
+    # tests at the "<release>-<branch>-<digest>-<commit>" images "build-containers" and
+    # "container-kicad" published a few jobs ago rather than at the last
+    # release's. Read by "partcad_utils.container_image", and through it by
+    # "runtime_python_docker.image_for", "part_factory_kicad.get_runtime" and
+    # "partcad_client.external"; ".github/actions/sandbox-image" reads the same
+    # variable out of this environment. See "Which images this run uses" on
+    # "set-matrix".
+    env:
+      PC_CONTAINER_IMAGE_TAG: ${{ needs.set-matrix.outputs.image-override }}
 
     steps:
       - uses: actions/checkout@v7
@@ -763,6 +1006,10 @@ jobs:
     # for all of that and was not enough; the last re-measure was 25 minutes of
     # growth ago.
     timeout-minutes: 75
+
+    # The images this run built, where it built any. See "Pytest" above.
+    env:
+      PC_CONTAINER_IMAGE_TAG: ${{ needs.set-matrix.outputs.image-override }}
 
     steps:
       - uses: actions/checkout@v7
@@ -891,6 +1138,10 @@ jobs:
     # both: ubuntu 24-32 min, Windows ~55 min and climbing -- 60 min was still
     # cancelling the slowest Windows cells, so give it real headroom.
     timeout-minutes: 75
+
+    # The images this run built, where it built any. See "Pytest" above.
+    env:
+      PC_CONTAINER_IMAGE_TAG: ${{ needs.set-matrix.outputs.image-override }}
 
     steps:
       - uses: actions/checkout@v7
@@ -1081,6 +1332,10 @@ jobs:
     # the timeout.
     timeout-minutes: 75
 
+    # The images this run built, where it built any. See "Pytest" above.
+    env:
+      PC_CONTAINER_IMAGE_TAG: ${{ needs.set-matrix.outputs.image-override }}
+
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-all
@@ -1186,6 +1441,10 @@ jobs:
     # deadline exists to prevent.
     timeout-minutes: 60
 
+    # The images this run built, where it built any. See "Pytest" above.
+    env:
+      PC_CONTAINER_IMAGE_TAG: ${{ needs.set-matrix.outputs.image-override }}
+
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-all
@@ -1269,3 +1528,110 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           codecov-files: pub-repo-test-results/junit.xml
           coverage-report: pub-repo-test-results/coverage.xml
+
+  # The tags this run published for its own use, deleted now that nothing in
+  # this workflow is going to ask for them again.
+  #
+  # Only a run that built images of its own has any -- "image-override" is empty
+  # otherwise -- so on an ordinary pull request this job does not exist. What it
+  # removes is what "Build the Python sandbox images" pushed under
+  # "<release>-<branch>-<digest>-<commit>-py<X>-<arch>": one tag per supported
+  # interpreter per
+  # architecture, per run, none of which anybody will ever pull again.
+  #
+  # "always()", because a red run leaks exactly as much as a green one and the
+  # tags are no more useful afterwards. A cancelled run may not get here at all,
+  # which is the first of two reasons the nightly sweep in
+  # "prune-container-images.yml" exists rather than this being the whole story.
+  #
+  # The second reason is the KiCad image, which this job deliberately does NOT
+  # touch. "CI-Dev" pulls that tag too -- "test_part_example_kicad" runs there
+  # as well -- and a "needs:" does not reach across a workflow, which is the
+  # fact this entire mechanism was built around. So there is no moment at which
+  # this workflow knows the other one is finished with it, and deleting it here
+  # would be the same "manifest unknown" that started all of this, arriving as a
+  # race instead of a certainty. The Python images have no such reader: the dev
+  # container cannot use the "docker" sandbox at all (it holds the *host's*
+  # socket -- see "mounts_are_shared"), so this workflow is the only consumer
+  # and it is done with them here.
+  cleanup-images:
+    name: "Remove this run's sandbox images"
+    needs:
+      - set-matrix
+      - build-containers
+      - test-pytest
+      - test-behave
+      - test-examples-partcad
+      - test-examples-all
+      - test-pub-repo
+    if: ${{ always() && needs.set-matrix.outputs.image-override != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: Delete the Python sandbox images this run published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The tag, and the package it is a tag of. Both built the same way
+          # the build built them, out of the same two values.
+          IMAGE_TAG: ${{ needs.set-matrix.outputs.image-tag }}
+          PYTHONS: ${{ env.PYTHONS }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY%%/*}"
+          package="${GITHUB_REPOSITORY#*/}-container-python"
+
+          # Both architectures, whether or not this run built both: a delete of
+          # a tag that is not there is a no-op, and listing what was built
+          # would be a third place that knows the arch rule.
+          wanted=""
+          for py in $(echo "${PYTHONS}" | jq -r '.[]'); do
+            for arch in amd64 arm64; do
+              wanted="${wanted} ${IMAGE_TAG}-py${py}-${arch}"
+            done
+          done
+          echo "looking for:${wanted}"
+
+          # A *version* is what the API deletes, and a version can carry more
+          # than one tag. Ours never does -- each build is its own manifest --
+          # but a version that has picked up a tag we did not publish is one
+          # whose deletion would take that tag with it, so it is left alone and
+          # said out loud instead.
+          failed=0
+          versions=$(gh api --paginate \
+            "orgs/${owner}/packages/container/${package}/versions?per_page=100" \
+            --jq '.[] | {id: .id, tags: (.metadata.container.tags // [])} | @json' || true)
+          if [ -z "${versions}" ]; then
+            echo "::warning::could not list versions of ${package}; the nightly sweep will pick these up"
+            exit 0
+          fi
+
+          while IFS= read -r version; do
+            [ -n "${version}" ] || continue
+            id=$(echo "${version}" | jq -r '.id')
+            tags=$(echo "${version}" | jq -r '.tags | join(" ")')
+            for tag in ${tags}; do
+              case " ${wanted} " in
+              *" ${tag} "*) ;;
+              *) continue ;;
+              esac
+              others=$(echo "${version}" | jq -r --arg t "${tag}" '.tags | map(select(. != $t)) | join(", ")')
+              if [ -n "${others}" ]; then
+                echo "::warning::${tag} shares a version with ${others}; leaving it"
+                continue
+              fi
+              echo "deleting ${package}:${tag} (version ${id})"
+              gh api --method DELETE \
+                "orgs/${owner}/packages/container/${package}/versions/${id}" || failed=1
+            done
+          done <<< "${versions}"
+
+          # Never the run's verdict. This is housekeeping after the tests have
+          # already said what they had to say, and the nightly sweep deletes
+          # whatever this could not -- so a permissions problem here is worth a
+          # warning on a pull request and a red job once a night, where somebody
+          # is looking at the sweep rather than at somebody else's change.
+          if [ "${failed}" -ne 0 ]; then
+            echo "::warning::some versions could not be deleted; the nightly sweep will pick them up"
+          fi

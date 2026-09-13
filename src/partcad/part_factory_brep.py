@@ -1,11 +1,9 @@
 import os
 
-from .part_factory_file import PartFactoryFile
 from . import logging as pc_logging
-from . import wrapper
-from . import shape_envelope
+from . import shape_envelope, telemetry, wrapper
 from .exception import PartFactoryError
-from . import telemetry
+from .part_factory_file import PartFactoryFile
 
 
 @telemetry.instrument()
@@ -61,8 +59,7 @@ class PartFactoryBrep(PartFactoryFile):
             response = shape_envelope.deserialize(response_serialized)
             if not response.get("success", False):
                 message = response.get("exception") or (
-                    "the BREP wrapper reported failure without a message for '%s:%s'"
-                    % (part.project_name, part.name)
+                    "the BREP wrapper reported failure without a message for '%s:%s'" % (part.project_name, part.name)
                 )
                 pc_logging.error(message)
                 raise PartFactoryError(message)

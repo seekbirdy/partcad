@@ -54,11 +54,14 @@ stubbed out, and the sandbox side is covered by the render tests.
 
 ```bash
 poetry run black --check src/partcad_ide_client tests/partcad_ide_client
+poetry run flake8 src/partcad_ide_client tests/partcad_ide_client
+poetry run isort --check --filter-files src/partcad_ide_client tests/partcad_ide_client
 ```
 
-Note that `flake8` reports E501 at 79 columns on every file in this repo (it does not read the 120-column
-setting from `pyproject.toml` without a plugin), and `isort` disagrees with the tree as committed; neither
-gates a PR. See the root [AGENTS.md](../../AGENTS.md).
+`black`, `flake8` and `isort` all gate now — each is a `pre-commit` hook and a `Lint (...)` job in `test.yml` —
+and the tree satisfies all three, so a finding from any of them is yours. flake8 only reads its configuration
+because `Flake8-pyproject` is installed; without it it checks at 79 columns. See the root
+[AGENTS.md](../../AGENTS.md).
 
 ## Commit
 

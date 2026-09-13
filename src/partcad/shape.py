@@ -7,7 +7,6 @@
 # Licensed under Apache License, Version 2.0.
 
 from __future__ import annotations
-from typing import TYPE_CHECKING
 
 import asyncio
 import base64
@@ -17,20 +16,17 @@ import sys
 import tempfile
 import threading
 import warnings
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
+from . import cae as pc_cae
+from . import logging as pc_logging
+from . import output, render_overlay
+from . import runtime as pc_runtime
+from . import sandbox_versions, wrapper
 from .cache_hash import CacheHash
 from .cache_shape import properties_key
-from . import output
 from .shape_config import ShapeConfiguration
 from .utils import total_size
-from . import logging as pc_logging
-from .sync_threads import threadpool_manager
-from . import render_overlay
-from . import sandbox_versions
-from . import wrapper
-from . import cae as pc_cae
-from . import runtime as pc_runtime
 
 if TYPE_CHECKING:
     from partcad.context import Context
@@ -42,9 +38,7 @@ if TYPE_CHECKING:
 # get_wrapped(), and convert()/show() which hand a live object to a CAD library
 # - can import the OCP codec lazily.
 sys.path.append(os.path.join(os.path.dirname(__file__), "wrappers"))
-from . import shape_envelope
-
-from . import telemetry
+from . import shape_envelope, telemetry
 
 PART_EXTENSION_MAPPING = {
     "step": "step",
@@ -241,9 +235,7 @@ class Shape(ShapeConfiguration):
         self.owns_cache_entry = True
 
         if self.cacheable:
-            cad_config = {
-                key: value for key, value in self.config.items() if key not in _NON_GEOMETRIC_CONFIG_KEYS
-            }
+            cad_config = {key: value for key, value in self.config.items() if key not in _NON_GEOMETRIC_CONFIG_KEYS}
             self.hash.add_dict(cad_config)
 
     def set_environment_cache_key(self, environment_cache_key: str) -> None:
@@ -285,7 +277,7 @@ class Shape(ShapeConfiguration):
 
         # Check for a match in other files associated with this shape
         if self.path and os.path.exists(self.path):
-            with open(self.path, errors='replace') as f:
+            with open(self.path, errors="replace") as f:
                 if keyword and keyword.lower() in f.read().lower():
                     return True
         return False
@@ -1239,9 +1231,7 @@ class Shape(ShapeConfiguration):
                 extra = {"output_files": [final_filepath]}
             else:
                 extra = {}
-            exitcode, response_serialized, errors = await runtime.run_async(
-                command, request_serialized, **extra
-            )
+            exitcode, response_serialized, errors = await runtime.run_async(command, request_serialized, **extra)
             if exitcode != 0 and len(errors) == 0:
                 errors = "Failed to execute command '%s' with exit code %s" % (" ".join(command), exitcode)
             if errors:

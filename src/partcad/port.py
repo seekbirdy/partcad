@@ -7,9 +7,8 @@
 # Licensed under Apache License, Version 2.0.
 #
 
-from .interface import Interface
-
 from . import telemetry
+from .interface import Interface
 
 
 @telemetry.instrument(exclude=["info"])
@@ -55,7 +54,7 @@ class WithPorts(Interface):
                 if interface.abstract:
                     continue
 
-                if not ":" in interface_name:
+                if ":" not in interface_name:
                     interface_name = self.project.name + ":" + interface_name
 
                 if not compatible and interface_name not in self.interfaces:

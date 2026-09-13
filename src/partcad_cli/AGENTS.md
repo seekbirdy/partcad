@@ -186,8 +186,13 @@ pc list all -r //pub/examples/partcad   # from ./examples, or any dir with a par
 ```bash
 black --check src/partcad_cli tests/partcad_cli
 flake8 src/partcad_cli tests/partcad_cli
-isort --check src/partcad_cli tests/partcad_cli
+isort --check --filter-files src/partcad_cli tests/partcad_cli
 ```
+
+All three gate — each is a `pre-commit` hook and a `Lint (...)` job in `test.yml`, and the tree satisfies
+all three, so a finding from any of them is yours. See the root [AGENTS.md](../../AGENTS.md) for the two flags that
+are load-bearing (`--filter-files`, and the `Flake8-pyproject` plugin without which flake8 reads no config
+at all).
 
 ## Commit
 
